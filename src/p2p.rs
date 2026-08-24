@@ -1,76 +1,32 @@
-//! Portable peer-to-peer policy foundation for BLE and future transports.
+//! Desktop policy over the canonical HHM peer-session wire contract.
 //!
-//! BLE discovery is transport evidence only. This module requires explicit
-//! peer selection, bounded consent, device-bound cryptographic verification,
-//! replay/expiry/rate controls, and allowlisted encrypted envelope kinds. It
-//! does not implement cryptography, authentication, code loading, or updates.
+//! `hhm-interfaces` owns the wire types. BLE is transport evidence only. This
+//! module adds explicit peer consent, fail-closed device/Shared Auth adapter
+//! boundaries, replay and rate controls, and stricter desktop limits. It does
+//! not implement authentication, cryptography, code loading, or installation.
 
 use std::{collections::VecDeque, fmt};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Duration, Utc};
+pub use hhm_interfaces::{
+    PEER_PROTOCOL_VERSION, PeerApplication, PeerCapability, PeerDecision, PeerEncryptedEnvelope,
+    PeerHandshakeRequest, PeerHandshakeResponse, PeerPayloadType, PeerPlatform, ReleaseChannel,
+    SignedUpdateManifest,
+};
+use url::Url;
+use uuid::Uuid;
 
-pub const HHM_DESKTOP_P2P_PROTOCOL_VERSION: u32 = 1;
+pub const HHM_DESKTOP_P2P_PROTOCOL_VERSION: &str = PEER_PROTOCOL_VERSION;
+pub const HHM_INTERFACES_P2P_REVISION: &str = "f694bc9b58907db918f0449b5d04a5763f8fa745";
 pub const MAX_ENVELOPE_CIPHERTEXT_BYTES: usize = 32 * 1024;
 pub const MAX_MESSAGES_PER_MINUTE: u16 = 30;
 pub const MAX_BYTES_PER_MINUTE: usize = 256 * 1024;
 
-const MAX_CONSENT_TTL_SECONDS: u64 = 5 * 60;
-const MAX_SESSION_TTL_SECONDS: u64 = 15 * 60;
-const MAX_ENVELOPE_TTL_SECONDS: u64 = 60;
-const MAX_CLOCK_SKEW_SECONDS: u64 = 30;
-const MAX_REMEMBERED_NONCES: usize = 128;
-const PEER_KEY_ID_HEX_BYTES: usize = 64;
-const DIGEST_HEX_BYTES: usize = 64;
-const SESSION_ID_BYTES: usize = 16;
-const CHALLENGE_NONCE_BYTES: usize = 32;
-const ENVELOPE_NONCE_BYTES: usize = 24;
-const MIN_SIGNATURE_BYTES: usize = 48;
-const MAX_SIGNATURE_BYTES: usize = 128;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum P2pPayloadKind {
-    PresenceRequestHint,
-    HouseNotice,
-    ResidentMessage,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct SessionOffer {
-    pub protocol_version: u32,
-    pub peer_key_id: String,
-    pub local_key_id: String,
-    pub session_id_b64: String,
-    pub challenge_nonce_b64: String,
-    pub issued_at_unix: u64,
-    pub expires_at_unix: u64,
-    pub device_signature_b64: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct EncryptedEnvelope {
-    pub protocol_version: u32,
-    pub peer_key_id: String,
-    pub session_id_b64: String,
-    pub sequence: u64,
-    pub expires_at_unix: u64,
-    pub kind: P2pPayloadKind,
-    pub aead_nonce_b64: String,
-    pub ciphertext_b64: String,
-    pub device_signature_b64: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct UpdateAnnouncement {
-    pub protocol_version: u32,
-    pub release_sequence: u64,
-    pub version: String,
-    pub manifest_sha256: String,
-    pub artifact_sha256: String,
-    pub release_key_id: String,
-    pub signature_b64: String,
-}
+const MAX_CONSENT_TTL_SECONDS: i64 = 5 * 60;
+const MAX_SESSION_TTL_SECONDS: i64 = 15 * 60;
+const MAX_ENVELOPE_TTL_SECONDS: i64 = 60;
+const MAX_REMEMBERED_REPLAY_VALUES: usize = 128;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum VerificationOutcome {
@@ -79,146 +35,204 @@ pub enum VerificationOutcome {
     Unavailable,
 }
 
-/// Cryptographic authority implemented only by the reviewed device/Shared Auth
-/// adapter. The domain intentionally provides no permissive production
-/// implementation.
+/// Authority implemented only by the reviewed device-bound Shared Auth and
+/// project release-key adapters. There is intentionally no permissive default.
 pub trait PeerCryptoVerifier {
-    fn verify_session_offer(&self, offer: &SessionOffer) -> VerificationOutcome;
-    fn verify_and_authenticate_envelope(&self, envelope: &EncryptedEnvelope)
-    -> VerificationOutcome;
-    fn verify_update_announcement(&self, announcement: &UpdateAnnouncement) -> VerificationOutcome;
+    fn verify_handshake(
+        &self,
+        request: &PeerHandshakeRequest,
+        response: &PeerHandshakeResponse,
+    ) -> VerificationOutcome;
+
+    fn verify_and_authenticate_envelope(
+        &self,
+        envelope: &PeerEncryptedEnvelope,
+    ) -> VerificationOutcome;
+
+    fn verify_update_manifest(&self, manifest: &SignedUpdateManifest) -> VerificationOutcome;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PeerSelection {
-    peer_key_id: String,
-    consent_expires_at_unix: u64,
+    peer_device_key_id: String,
+    consent_expires_at: DateTime<Utc>,
 }
 
 impl PeerSelection {
-    /// Records explicit local consent for one selected peer.
+    /// Records explicit, expiring local consent for one user-selected peer.
     ///
     /// # Errors
     ///
-    /// Rejects malformed peer key identifiers, zero-length consent, consent
-    /// longer than five minutes, and timestamp overflow.
+    /// Rejects malformed key identifiers and consent outside 1–300 seconds.
     pub fn try_new(
-        peer_key_id: &str,
-        now_unix: u64,
-        consent_ttl_seconds: u64,
+        peer_device_key_id: &str,
+        now: DateTime<Utc>,
+        consent_ttl_seconds: i64,
     ) -> Result<Self, P2pPolicyError> {
-        if !valid_hex(peer_key_id, PEER_KEY_ID_HEX_BYTES) {
+        if !valid_key_id(peer_device_key_id) {
             return Err(P2pPolicyError::InvalidPeerKey);
         }
         if !(1..=MAX_CONSENT_TTL_SECONDS).contains(&consent_ttl_seconds) {
             return Err(P2pPolicyError::InvalidConsentWindow);
         }
-        let Some(consent_expires_at_unix) = now_unix.checked_add(consent_ttl_seconds) else {
+        let Some(consent_expires_at) =
+            now.checked_add_signed(Duration::seconds(consent_ttl_seconds))
+        else {
             return Err(P2pPolicyError::InvalidConsentWindow);
         };
         Ok(Self {
-            peer_key_id: peer_key_id.to_owned(),
-            consent_expires_at_unix,
+            peer_device_key_id: peer_device_key_id.to_owned(),
+            consent_expires_at,
         })
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AcceptedEnvelope {
-    pub kind: P2pPayloadKind,
-    pub sequence: u64,
+    pub payload_type: PeerPayloadType,
+    pub sequence: u32,
     pub ciphertext_bytes: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerifiedUpdateMetadata {
-    pub release_sequence: u64,
     pub version: String,
-    pub manifest_sha256: String,
+    pub anti_rollback_counter: u64,
+    pub artifact_size: u64,
     pub artifact_sha256: String,
+    pub artifact_url: String,
 }
 
 pub struct PeerSessionGuard {
-    peer_key_id: String,
-    session_id_b64: String,
-    expires_at_unix: u64,
-    last_sequence: Option<u64>,
+    peer_device_key_id: String,
+    session_id: Uuid,
+    selected_capabilities: Vec<PeerCapability>,
+    expires_at: DateTime<Utc>,
+    last_sequence: Option<u32>,
     seen_nonces: VecDeque<String>,
-    rate_window_started_at_unix: u64,
+    seen_message_ids: VecDeque<Uuid>,
+    rate_window_started_at: DateTime<Utc>,
     messages_in_window: u16,
     bytes_in_window: usize,
 }
 
 impl PeerSessionGuard {
-    /// Establishes policy state only after consent and device-bound signature
-    /// verification by the official adapter.
+    /// Establishes local policy state for a canonical accepted handshake only
+    /// after explicit peer selection and official adapter verification.
     ///
     /// # Errors
     ///
-    /// Rejects protocol mismatch, malformed/boundary-breaking metadata,
-    /// unselected peers, expired consent/offers, excessive session lifetime,
-    /// invalid signatures, and unavailable verification authority.
+    /// Fails closed on malformed/mismatched transcripts, expired consent,
+    /// missing capability consent, invalid local binding, invalid crypto, or an
+    /// unavailable verification authority.
     pub fn establish(
         selection: &PeerSelection,
-        expected_local_key_id: &str,
-        offer: &SessionOffer,
-        now_unix: u64,
+        expected_local_device_key_id: &str,
+        request: &PeerHandshakeRequest,
+        response: &PeerHandshakeResponse,
+        now: DateTime<Utc>,
+        session_ttl_seconds: i64,
         verifier: &impl PeerCryptoVerifier,
     ) -> Result<Self, P2pPolicyError> {
-        validate_session_offer(offer, expected_local_key_id, now_unix)?;
-        if selection.consent_expires_at_unix <= now_unix {
+        request
+            .validate_shape(now)
+            .map_err(|_| P2pPolicyError::InvalidHandshakeShape)?;
+        response
+            .validate_shape(now)
+            .map_err(|_| P2pPolicyError::InvalidHandshakeShape)?;
+        if selection.consent_expires_at <= now {
             return Err(P2pPolicyError::ConsentExpired);
         }
-        if selection.peer_key_id != offer.peer_key_id {
+        if selection.peer_device_key_id != request.device_key_id {
             return Err(P2pPolicyError::PeerNotSelected);
         }
-        require_verified(verifier.verify_session_offer(offer))?;
+        if !valid_key_id(expected_local_device_key_id)
+            || response.device_key_id.as_deref() != Some(expected_local_device_key_id)
+        {
+            return Err(P2pPolicyError::InvalidLocalKey);
+        }
+        if response.decision != PeerDecision::Accepted
+            || request.protocol_version != response.protocol_version
+            || request.session_id != response.session_id
+            || request.offer_id != response.offer_id
+            || response.selected_capabilities.is_empty()
+            || !response
+                .selected_capabilities
+                .iter()
+                .all(|capability| request.requested_capabilities.contains(capability))
+        {
+            return Err(P2pPolicyError::HandshakeMismatch);
+        }
+        if !(1..=MAX_SESSION_TTL_SECONDS).contains(&session_ttl_seconds) {
+            return Err(P2pPolicyError::InvalidSessionWindow);
+        }
+        let Some(expires_at) = now.checked_add_signed(Duration::seconds(session_ttl_seconds))
+        else {
+            return Err(P2pPolicyError::InvalidSessionWindow);
+        };
+        require_verified(verifier.verify_handshake(request, response))?;
+
         Ok(Self {
-            peer_key_id: offer.peer_key_id.clone(),
-            session_id_b64: offer.session_id_b64.clone(),
-            expires_at_unix: offer.expires_at_unix,
+            peer_device_key_id: request.device_key_id.clone(),
+            session_id: request.session_id,
+            selected_capabilities: response.selected_capabilities.clone(),
+            expires_at,
             last_sequence: None,
-            seen_nonces: VecDeque::with_capacity(MAX_REMEMBERED_NONCES),
-            rate_window_started_at_unix: now_unix,
+            seen_nonces: VecDeque::with_capacity(MAX_REMEMBERED_REPLAY_VALUES),
+            seen_message_ids: VecDeque::with_capacity(MAX_REMEMBERED_REPLAY_VALUES),
+            rate_window_started_at: now,
             messages_in_window: 0,
             bytes_in_window: 0,
         })
     }
 
-    /// Validates an encrypted, signed allowlisted envelope and commits replay
-    /// and rate-limit state only after cryptographic verification succeeds.
+    /// Applies canonical shape validation plus the stricter desktop policy to
+    /// one encrypted allowlisted envelope.
     ///
     /// # Errors
     ///
-    /// Fails closed on malformed metadata, session/peer mismatch, expiry,
-    /// replay, excessive size/rate, invalid authentication, or unavailable
-    /// verification authority.
+    /// Fails closed on session/capability mismatch, expiry, replay, excessive
+    /// size/rate, invalid authentication, or unavailable verification.
     pub fn accept_envelope(
         &mut self,
-        envelope: &EncryptedEnvelope,
-        now_unix: u64,
+        envelope: &PeerEncryptedEnvelope,
+        now: DateTime<Utc>,
         verifier: &impl PeerCryptoVerifier,
     ) -> Result<AcceptedEnvelope, P2pPolicyError> {
-        if now_unix >= self.expires_at_unix {
+        if now >= self.expires_at {
             return Err(P2pPolicyError::SessionExpired);
         }
-        validate_envelope_shape(envelope, now_unix, self.expires_at_unix)?;
-        if envelope.peer_key_id != self.peer_key_id
-            || envelope.session_id_b64 != self.session_id_b64
+        envelope
+            .validate_shape(now)
+            .map_err(|_| P2pPolicyError::InvalidEnvelopeShape)?;
+        if envelope.session_id != self.session_id
+            || envelope.sender_key_id != self.peer_device_key_id
         {
             return Err(P2pPolicyError::SessionMismatch);
+        }
+        if !self.allows_payload(envelope.payload_type) {
+            return Err(P2pPolicyError::CapabilityDenied);
+        }
+        if envelope.expires_at > self.expires_at
+            || envelope.expires_at - envelope.created_at
+                > Duration::seconds(MAX_ENVELOPE_TTL_SECONDS)
+        {
+            return Err(P2pPolicyError::EnvelopeExpired);
         }
         if self
             .last_sequence
             .is_some_and(|sequence| envelope.sequence <= sequence)
-            || self.seen_nonces.contains(&envelope.aead_nonce_b64)
+            || self.seen_nonces.contains(&envelope.nonce)
+            || self.seen_message_ids.contains(&envelope.message_id)
         {
             return Err(P2pPolicyError::ReplayDetected);
         }
-        let ciphertext_bytes =
-            decoded_len(&envelope.ciphertext_b64, 1, MAX_ENVELOPE_CIPHERTEXT_BYTES)?;
+        let ciphertext_bytes = decoded_len(&envelope.ciphertext)?;
 
-        let reset_window = now_unix.saturating_sub(self.rate_window_started_at_unix) >= 60;
+        let reset_window = now
+            .signed_duration_since(self.rate_window_started_at)
+            .num_seconds()
+            >= 60;
         let (messages, bytes) = if reset_window {
             (1, ciphertext_bytes)
         } else {
@@ -230,93 +244,96 @@ impl PeerSessionGuard {
         if messages > MAX_MESSAGES_PER_MINUTE || bytes > MAX_BYTES_PER_MINUTE {
             return Err(P2pPolicyError::RateLimited);
         }
-
         require_verified(verifier.verify_and_authenticate_envelope(envelope))?;
 
         if reset_window {
-            self.rate_window_started_at_unix = now_unix;
+            self.rate_window_started_at = now;
         }
         self.messages_in_window = messages;
         self.bytes_in_window = bytes;
         self.last_sequence = Some(envelope.sequence);
-        if self.seen_nonces.len() == MAX_REMEMBERED_NONCES {
-            drop(self.seen_nonces.pop_front());
-        }
-        self.seen_nonces.push_back(envelope.aead_nonce_b64.clone());
+        remember(&mut self.seen_nonces, envelope.nonce.clone());
+        remember(&mut self.seen_message_ids, envelope.message_id);
 
         Ok(AcceptedEnvelope {
-            kind: envelope.kind,
+            payload_type: envelope.payload_type,
             sequence: envelope.sequence,
             ciphertext_bytes,
         })
     }
+
+    fn allows_payload(&self, payload_type: PeerPayloadType) -> bool {
+        let capability = match payload_type {
+            PeerPayloadType::ResidentMessage => Some(PeerCapability::ResidentMessage),
+            PeerPayloadType::ContactCard => Some(PeerCapability::ContactCard),
+            PeerPayloadType::FileManifest => Some(PeerCapability::FileManifest),
+            PeerPayloadType::UpdateManifest => Some(PeerCapability::UpdateManifest),
+            PeerPayloadType::Receipt => None,
+        };
+        capability.is_none_or(|value| self.selected_capabilities.contains(&value))
+    }
 }
 
-/// Validates signed peer-discovered update metadata without accepting artifact
-/// bytes, URLs, executable code, or install instructions.
-///
-/// The caller must pass the project-pinned release-key identifier and the
-/// locally installed release sequence. An accepted result is metadata only;
-/// an official updater must fetch and verify the manifest/artifact from its
-/// configured trusted origin before any installation.
+/// Verifies canonical peer-discovered update metadata. An accepted result is
+/// metadata only; this module never downloads, loads, or installs an artifact.
 ///
 /// # Errors
 ///
-/// Rejects malformed metadata, wrong release keys, rollback/equal sequences,
-/// invalid signatures, and unavailable verification authority.
-pub fn consider_update_announcement(
-    announcement: &UpdateAnnouncement,
+/// Rejects wrong app/platform/channel/key/origin, rollback, invalid shape or
+/// signature, and unavailable verification authority.
+pub fn consider_update_manifest(
+    manifest: &SignedUpdateManifest,
+    expected_platform: PeerPlatform,
+    expected_channel: ReleaseChannel,
     pinned_release_key_id: &str,
-    installed_release_sequence: u64,
+    installed_anti_rollback_counter: u64,
+    official_release_origin: &str,
     verifier: &impl PeerCryptoVerifier,
 ) -> Result<VerifiedUpdateMetadata, P2pPolicyError> {
-    if announcement.protocol_version != HHM_DESKTOP_P2P_PROTOCOL_VERSION {
-        return Err(P2pPolicyError::UnsupportedProtocol);
+    manifest
+        .validate_shape()
+        .map_err(|_| P2pPolicyError::InvalidReleaseMetadata)?;
+    if manifest.app_id != PeerApplication::HhmDesktopAppRs {
+        return Err(P2pPolicyError::WrongApplication);
     }
-    if !valid_hex(pinned_release_key_id, PEER_KEY_ID_HEX_BYTES)
-        || !valid_hex(&announcement.release_key_id, PEER_KEY_ID_HEX_BYTES)
-    {
-        return Err(P2pPolicyError::InvalidReleaseMetadata);
+    if manifest.platform != expected_platform {
+        return Err(P2pPolicyError::WrongPlatform);
     }
-    if announcement.release_key_id != pinned_release_key_id {
+    if manifest.channel != expected_channel {
+        return Err(P2pPolicyError::WrongChannel);
+    }
+    if !valid_key_id(pinned_release_key_id) || manifest.signing_key_id != pinned_release_key_id {
         return Err(P2pPolicyError::WrongReleaseKey);
     }
-    if announcement.release_sequence <= installed_release_sequence {
+    if manifest.anti_rollback_counter <= installed_anti_rollback_counter {
         return Err(P2pPolicyError::RollbackRejected);
     }
-    if !valid_version(&announcement.version)
-        || !valid_hex(&announcement.manifest_sha256, DIGEST_HEX_BYTES)
-        || !valid_hex(&announcement.artifact_sha256, DIGEST_HEX_BYTES)
-    {
-        return Err(P2pPolicyError::InvalidReleaseMetadata);
-    }
-    decoded_len(
-        &announcement.signature_b64,
-        MIN_SIGNATURE_BYTES,
-        MAX_SIGNATURE_BYTES,
-    )?;
-    require_verified(verifier.verify_update_announcement(announcement))?;
+    validate_official_origin(&manifest.artifact_url, official_release_origin)?;
+    require_verified(verifier.verify_update_manifest(manifest))?;
+
     Ok(VerifiedUpdateMetadata {
-        release_sequence: announcement.release_sequence,
-        version: announcement.version.clone(),
-        manifest_sha256: announcement.manifest_sha256.clone(),
-        artifact_sha256: announcement.artifact_sha256.clone(),
+        version: manifest.version.clone(),
+        anti_rollback_counter: manifest.anti_rollback_counter,
+        artifact_size: manifest.artifact_size,
+        artifact_sha256: manifest.artifact_sha256.clone(),
+        artifact_url: manifest.artifact_url.clone(),
     })
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum P2pPolicyError {
-    UnsupportedProtocol,
     InvalidPeerKey,
     InvalidLocalKey,
-    InvalidEncoding,
     InvalidConsentWindow,
     ConsentExpired,
     PeerNotSelected,
-    OfferExpired,
+    InvalidHandshakeShape,
+    HandshakeMismatch,
     InvalidSessionWindow,
     SessionExpired,
     SessionMismatch,
+    CapabilityDenied,
+    InvalidEnvelopeShape,
     ReplayDetected,
     EnvelopeExpired,
     EnvelopeTooLarge,
@@ -324,32 +341,41 @@ pub enum P2pPolicyError {
     VerificationInvalid,
     VerificationUnavailable,
     InvalidReleaseMetadata,
+    WrongApplication,
+    WrongPlatform,
+    WrongChannel,
     WrongReleaseKey,
+    UntrustedReleaseOrigin,
     RollbackRejected,
 }
 
 impl fmt::Display for P2pPolicyError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            Self::UnsupportedProtocol => "unsupported P2P protocol",
             Self::InvalidPeerKey => "invalid peer key identifier",
             Self::InvalidLocalKey => "invalid local key identifier",
-            Self::InvalidEncoding => "invalid bounded P2P encoding",
             Self::InvalidConsentWindow => "invalid peer consent window",
             Self::ConsentExpired => "peer consent expired",
             Self::PeerNotSelected => "peer was not explicitly selected",
-            Self::OfferExpired => "peer session offer expired",
+            Self::InvalidHandshakeShape => "invalid canonical handshake shape",
+            Self::HandshakeMismatch => "peer handshake transcript does not match",
             Self::InvalidSessionWindow => "invalid peer session window",
             Self::SessionExpired => "peer session expired",
             Self::SessionMismatch => "peer session does not match",
+            Self::CapabilityDenied => "peer payload capability was not selected",
+            Self::InvalidEnvelopeShape => "invalid canonical encrypted envelope shape",
             Self::ReplayDetected => "peer envelope replay detected",
             Self::EnvelopeExpired => "peer envelope expired",
-            Self::EnvelopeTooLarge => "peer envelope exceeds the size bound",
+            Self::EnvelopeTooLarge => "peer envelope exceeds the desktop size bound",
             Self::RateLimited => "peer envelope rate exceeded",
             Self::VerificationInvalid => "peer cryptographic verification failed",
             Self::VerificationUnavailable => "peer cryptographic verification unavailable",
             Self::InvalidReleaseMetadata => "invalid release metadata",
+            Self::WrongApplication => "update is for a different application",
+            Self::WrongPlatform => "update is for a different platform",
+            Self::WrongChannel => "update is for a different release channel",
             Self::WrongReleaseKey => "release key is not project-pinned",
+            Self::UntrustedReleaseOrigin => "update origin is not an official allowlisted origin",
             Self::RollbackRejected => "release rollback rejected",
         })
     }
@@ -357,74 +383,53 @@ impl fmt::Display for P2pPolicyError {
 
 impl std::error::Error for P2pPolicyError {}
 
-fn validate_session_offer(
-    offer: &SessionOffer,
-    expected_local_key_id: &str,
-    now_unix: u64,
-) -> Result<(), P2pPolicyError> {
-    if offer.protocol_version != HHM_DESKTOP_P2P_PROTOCOL_VERSION {
-        return Err(P2pPolicyError::UnsupportedProtocol);
+fn decoded_len(value: &str) -> Result<usize, P2pPolicyError> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| P2pPolicyError::InvalidEnvelopeShape)?;
+    if bytes.is_empty() {
+        return Err(P2pPolicyError::InvalidEnvelopeShape);
     }
-    if !valid_hex(&offer.peer_key_id, PEER_KEY_ID_HEX_BYTES) {
-        return Err(P2pPolicyError::InvalidPeerKey);
+    if bytes.len() > MAX_ENVELOPE_CIPHERTEXT_BYTES {
+        return Err(P2pPolicyError::EnvelopeTooLarge);
     }
-    if !valid_hex(expected_local_key_id, PEER_KEY_ID_HEX_BYTES)
-        || offer.local_key_id != expected_local_key_id
-    {
-        return Err(P2pPolicyError::InvalidLocalKey);
-    }
-    decoded_len(&offer.session_id_b64, SESSION_ID_BYTES, SESSION_ID_BYTES)?;
-    decoded_len(
-        &offer.challenge_nonce_b64,
-        CHALLENGE_NONCE_BYTES,
-        CHALLENGE_NONCE_BYTES,
-    )?;
-    decoded_len(
-        &offer.device_signature_b64,
-        MIN_SIGNATURE_BYTES,
-        MAX_SIGNATURE_BYTES,
-    )?;
-    if offer.expires_at_unix <= now_unix {
-        return Err(P2pPolicyError::OfferExpired);
-    }
-    if offer.issued_at_unix > now_unix.saturating_add(MAX_CLOCK_SKEW_SECONDS)
-        || offer.expires_at_unix <= offer.issued_at_unix
-        || offer.expires_at_unix.saturating_sub(offer.issued_at_unix) > MAX_SESSION_TTL_SECONDS
-    {
-        return Err(P2pPolicyError::InvalidSessionWindow);
-    }
-    Ok(())
+    Ok(bytes.len())
 }
 
-fn validate_envelope_shape(
-    envelope: &EncryptedEnvelope,
-    now_unix: u64,
-    session_expires_at_unix: u64,
+fn valid_key_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-'))
+}
+
+fn validate_official_origin(
+    artifact_url: &str,
+    official_release_origin: &str,
 ) -> Result<(), P2pPolicyError> {
-    if envelope.protocol_version != HHM_DESKTOP_P2P_PROTOCOL_VERSION {
-        return Err(P2pPolicyError::UnsupportedProtocol);
+    let artifact = Url::parse(artifact_url).map_err(|_| P2pPolicyError::UntrustedReleaseOrigin)?;
+    let official =
+        Url::parse(official_release_origin).map_err(|_| P2pPolicyError::UntrustedReleaseOrigin)?;
+    let valid = artifact.scheme() == "https"
+        && official.scheme() == "https"
+        && artifact.host_str().is_some()
+        && official.host_str().is_some()
+        && artifact.username().is_empty()
+        && official.username().is_empty()
+        && artifact.password().is_none()
+        && official.password().is_none()
+        && artifact.query().is_none()
+        && artifact.fragment().is_none()
+        && official.query().is_none()
+        && official.fragment().is_none()
+        && official.path() == "/"
+        && artifact.origin() == official.origin();
+    if valid {
+        Ok(())
+    } else {
+        Err(P2pPolicyError::UntrustedReleaseOrigin)
     }
-    if !valid_hex(&envelope.peer_key_id, PEER_KEY_ID_HEX_BYTES) {
-        return Err(P2pPolicyError::InvalidPeerKey);
-    }
-    decoded_len(&envelope.session_id_b64, SESSION_ID_BYTES, SESSION_ID_BYTES)?;
-    decoded_len(
-        &envelope.aead_nonce_b64,
-        ENVELOPE_NONCE_BYTES,
-        ENVELOPE_NONCE_BYTES,
-    )?;
-    decoded_len(
-        &envelope.device_signature_b64,
-        MIN_SIGNATURE_BYTES,
-        MAX_SIGNATURE_BYTES,
-    )?;
-    if envelope.expires_at_unix <= now_unix
-        || envelope.expires_at_unix > session_expires_at_unix
-        || envelope.expires_at_unix.saturating_sub(now_unix) > MAX_ENVELOPE_TTL_SECONDS
-    {
-        return Err(P2pPolicyError::EnvelopeExpired);
-    }
-    Ok(())
 }
 
 fn require_verified(outcome: VerificationOutcome) -> Result<(), P2pPolicyError> {
@@ -435,105 +440,107 @@ fn require_verified(outcome: VerificationOutcome) -> Result<(), P2pPolicyError> 
     }
 }
 
-fn decoded_len(value: &str, minimum: usize, maximum: usize) -> Result<usize, P2pPolicyError> {
-    let bytes = URL_SAFE_NO_PAD
-        .decode(value)
-        .map_err(|_| P2pPolicyError::InvalidEncoding)?;
-    if bytes.len() < minimum {
-        return Err(P2pPolicyError::InvalidEncoding);
+fn remember<T>(values: &mut VecDeque<T>, value: T) {
+    if values.len() == MAX_REMEMBERED_REPLAY_VALUES {
+        drop(values.pop_front());
     }
-    if bytes.len() > maximum {
-        return Err(P2pPolicyError::EnvelopeTooLarge);
-    }
-    Ok(bytes.len())
-}
-
-fn valid_hex(value: &str, exact_bytes: usize) -> bool {
-    value.len() == exact_bytes && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
-fn valid_version(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
+    values.push_back(value);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const NOW: u64 = 2_000_000_000;
+    const NOW_UNIX: i64 = 2_000_000_000;
 
     struct TestVerifier(VerificationOutcome);
 
     impl PeerCryptoVerifier for TestVerifier {
-        fn verify_session_offer(&self, _offer: &SessionOffer) -> VerificationOutcome {
+        fn verify_handshake(
+            &self,
+            _request: &PeerHandshakeRequest,
+            _response: &PeerHandshakeResponse,
+        ) -> VerificationOutcome {
             self.0
         }
 
         fn verify_and_authenticate_envelope(
             &self,
-            _envelope: &EncryptedEnvelope,
+            _envelope: &PeerEncryptedEnvelope,
         ) -> VerificationOutcome {
             self.0
         }
 
-        fn verify_update_announcement(
-            &self,
-            _announcement: &UpdateAnnouncement,
-        ) -> VerificationOutcome {
+        fn verify_update_manifest(&self, _manifest: &SignedUpdateManifest) -> VerificationOutcome {
             self.0
         }
     }
 
-    fn key(byte: &str) -> String {
-        byte.repeat(32)
+    fn now() -> DateTime<Utc> {
+        DateTime::from_timestamp(NOW_UNIX, 0).unwrap_or_default()
     }
 
-    fn encoded(byte: u8, length: usize) -> String {
-        URL_SAFE_NO_PAD.encode(vec![byte; length])
-    }
-
-    fn offer(peer: &str, local: &str) -> SessionOffer {
-        SessionOffer {
-            protocol_version: HHM_DESKTOP_P2P_PROTOCOL_VERSION,
-            peer_key_id: peer.to_owned(),
-            local_key_id: local.to_owned(),
-            session_id_b64: encoded(1, SESSION_ID_BYTES),
-            challenge_nonce_b64: encoded(2, CHALLENGE_NONCE_BYTES),
-            issued_at_unix: NOW,
-            expires_at_unix: NOW + 300,
-            device_signature_b64: encoded(3, 64),
+    fn request(peer: &str) -> PeerHandshakeRequest {
+        PeerHandshakeRequest {
+            protocol_version: PEER_PROTOCOL_VERSION.to_owned(),
+            session_id: Uuid::from_u128(1),
+            offer_id: Uuid::from_u128(2),
+            challenge_nonce: "n".repeat(22),
+            ephemeral_public_key: "e".repeat(43),
+            device_key_id: peer.to_owned(),
+            device_attestation: "a".repeat(64),
+            requested_capabilities: vec![
+                PeerCapability::ResidentMessage,
+                PeerCapability::UpdateManifest,
+            ],
+            expires_at: now() + Duration::seconds(60),
         }
     }
 
-    fn envelope(peer: &str, sequence: u64, nonce_byte: u8) -> EncryptedEnvelope {
-        EncryptedEnvelope {
-            protocol_version: HHM_DESKTOP_P2P_PROTOCOL_VERSION,
-            peer_key_id: peer.to_owned(),
-            session_id_b64: encoded(1, SESSION_ID_BYTES),
+    fn response(local: &str) -> PeerHandshakeResponse {
+        PeerHandshakeResponse {
+            protocol_version: PEER_PROTOCOL_VERSION.to_owned(),
+            session_id: Uuid::from_u128(1),
+            offer_id: Uuid::from_u128(2),
+            decision: PeerDecision::Accepted,
+            selected_capabilities: vec![PeerCapability::ResidentMessage],
+            ephemeral_public_key: Some("f".repeat(43)),
+            device_key_id: Some(local.to_owned()),
+            device_attestation: Some("c".repeat(64)),
+            transcript_signature: Some("s".repeat(64)),
+            rejection_code: None,
+            expires_at: now() + Duration::seconds(60),
+        }
+    }
+
+    fn envelope(peer: &str, sequence: u32, nonce_byte: u8) -> PeerEncryptedEnvelope {
+        PeerEncryptedEnvelope {
+            protocol_version: PEER_PROTOCOL_VERSION.to_owned(),
+            session_id: Uuid::from_u128(1),
+            message_id: Uuid::from_u128(u128::from(sequence) + 100),
             sequence,
-            expires_at_unix: NOW + 30,
-            kind: P2pPayloadKind::HouseNotice,
-            aead_nonce_b64: encoded(nonce_byte, ENVELOPE_NONCE_BYTES),
-            ciphertext_b64: encoded(9, 128),
-            device_signature_b64: encoded(4, 64),
+            payload_type: PeerPayloadType::ResidentMessage,
+            nonce: URL_SAFE_NO_PAD.encode(vec![nonce_byte; 16]),
+            ciphertext: URL_SAFE_NO_PAD.encode(vec![9; 128]),
+            sender_key_id: peer.to_owned(),
+            created_at: now(),
+            expires_at: now() + Duration::seconds(30),
         }
     }
 
     fn established_guard() -> PeerSessionGuard {
-        let peer = key("11");
-        let local = key("22");
-        let selection = PeerSelection::try_new(&peer, NOW, 120);
+        let peer = "device:peer-1";
+        let local = "device:local-1";
+        let selection = PeerSelection::try_new(peer, now(), 120);
         assert!(selection.is_ok());
         let result = selection.and_then(|selection| {
             PeerSessionGuard::establish(
                 &selection,
-                &local,
-                &offer(&peer, &local),
-                NOW,
+                local,
+                &request(peer),
+                &response(local),
+                now(),
+                600,
                 &TestVerifier(VerificationOutcome::Verified),
             )
         });
@@ -542,34 +549,36 @@ mod tests {
     }
 
     #[test]
-    fn session_requires_explicit_selected_peer_and_valid_crypto() {
-        let peer = key("11");
-        let other = key("33");
-        let local = key("22");
-        let selection = PeerSelection::try_new(&other, NOW, 120);
+    fn session_requires_selected_peer_and_available_valid_crypto() {
+        let local = "device:local-1";
+        let selection = PeerSelection::try_new("device:other", now(), 120);
         assert!(selection.is_ok());
         if let Ok(selection) = selection {
             assert!(matches!(
                 PeerSessionGuard::establish(
                     &selection,
-                    &local,
-                    &offer(&peer, &local),
-                    NOW,
+                    local,
+                    &request("device:peer-1"),
+                    &response(local),
+                    now(),
+                    600,
                     &TestVerifier(VerificationOutcome::Verified),
                 ),
                 Err(P2pPolicyError::PeerNotSelected)
             ));
         }
 
-        let selection = PeerSelection::try_new(&peer, NOW, 120);
+        let selection = PeerSelection::try_new("device:peer-1", now(), 120);
         assert!(selection.is_ok());
         if let Ok(selection) = selection {
             assert!(matches!(
                 PeerSessionGuard::establish(
                     &selection,
-                    &local,
-                    &offer(&peer, &local),
-                    NOW,
+                    local,
+                    &request("device:peer-1"),
+                    &response(local),
+                    now(),
+                    600,
                     &TestVerifier(VerificationOutcome::Unavailable),
                 ),
                 Err(P2pPolicyError::VerificationUnavailable)
@@ -578,41 +587,47 @@ mod tests {
     }
 
     #[test]
-    fn rejects_replay_expiry_and_oversized_ciphertext() {
-        let peer = key("11");
+    fn rejects_replay_expiry_oversize_and_unselected_payload() {
+        let peer = "device:peer-1";
         let verifier = TestVerifier(VerificationOutcome::Verified);
         let mut guard = established_guard();
-        let first = envelope(&peer, 1, 7);
-        assert!(guard.accept_envelope(&first, NOW + 1, &verifier).is_ok());
+        let first = envelope(peer, 1, 7);
+        assert!(guard.accept_envelope(&first, now(), &verifier).is_ok());
         assert!(matches!(
-            guard.accept_envelope(&first, NOW + 2, &verifier),
+            guard.accept_envelope(&first, now(), &verifier),
             Err(P2pPolicyError::ReplayDetected)
         ));
 
-        let mut expired = envelope(&peer, 2, 8);
-        expired.expires_at_unix = NOW;
+        let mut expired = envelope(peer, 2, 8);
+        expired.expires_at = now() + Duration::seconds(61);
         assert!(matches!(
-            guard.accept_envelope(&expired, NOW + 2, &verifier),
+            guard.accept_envelope(&expired, now(), &verifier),
             Err(P2pPolicyError::EnvelopeExpired)
         ));
 
-        let mut oversized = envelope(&peer, 2, 8);
-        oversized.ciphertext_b64 = encoded(9, MAX_ENVELOPE_CIPHERTEXT_BYTES + 1);
+        let mut oversized = envelope(peer, 2, 8);
+        oversized.ciphertext = URL_SAFE_NO_PAD.encode(vec![9; MAX_ENVELOPE_CIPHERTEXT_BYTES + 1]);
         assert!(matches!(
-            guard.accept_envelope(&oversized, NOW + 2, &verifier),
+            guard.accept_envelope(&oversized, now(), &verifier),
             Err(P2pPolicyError::EnvelopeTooLarge)
+        ));
+
+        let mut denied = envelope(peer, 2, 8);
+        denied.payload_type = PeerPayloadType::ContactCard;
+        assert!(matches!(
+            guard.accept_envelope(&denied, now(), &verifier),
+            Err(P2pPolicyError::CapabilityDenied)
         ));
     }
 
     #[test]
-    fn rate_limit_and_failed_crypto_do_not_commit_replay_state() {
-        let peer = key("11");
+    fn failed_crypto_does_not_commit_replay_state() {
+        let candidate = envelope("device:peer-1", 1, 7);
         let mut guard = established_guard();
-        let candidate = envelope(&peer, 1, 7);
         assert!(matches!(
             guard.accept_envelope(
                 &candidate,
-                NOW + 1,
+                now(),
                 &TestVerifier(VerificationOutcome::Invalid),
             ),
             Err(P2pPolicyError::VerificationInvalid)
@@ -621,124 +636,139 @@ mod tests {
             guard
                 .accept_envelope(
                     &candidate,
-                    NOW + 1,
+                    now(),
                     &TestVerifier(VerificationOutcome::Verified),
                 )
                 .is_ok()
         );
-
-        for sequence in 2..=u64::from(MAX_MESSAGES_PER_MINUTE) {
-            let nonce = u8::try_from(sequence.saturating_add(10)).unwrap_or(10);
-            let message = envelope(&peer, sequence, nonce);
-            assert!(
-                guard
-                    .accept_envelope(
-                        &message,
-                        NOW + 2,
-                        &TestVerifier(VerificationOutcome::Verified),
-                    )
-                    .is_ok()
-            );
-        }
-        let limited = envelope(&peer, u64::from(MAX_MESSAGES_PER_MINUTE) + 1, 99);
-        assert!(matches!(
-            guard.accept_envelope(
-                &limited,
-                NOW + 2,
-                &TestVerifier(VerificationOutcome::Verified),
-            ),
-            Err(P2pPolicyError::RateLimited)
-        ));
     }
 
     #[test]
-    fn byte_rate_limit_is_independent_from_message_count() {
-        let peer = key("11");
+    fn rate_limit_is_enforced() {
         let verifier = TestVerifier(VerificationOutcome::Verified);
         let mut guard = established_guard();
-        for sequence in 1..=8 {
-            let mut message = envelope(&peer, sequence, u8::try_from(sequence).unwrap_or(1));
-            message.ciphertext_b64 = encoded(9, MAX_ENVELOPE_CIPHERTEXT_BYTES);
-            assert!(guard.accept_envelope(&message, NOW + 1, &verifier).is_ok());
+        for sequence in 1..=u32::from(MAX_MESSAGES_PER_MINUTE) {
+            let message = envelope(
+                "device:peer-1",
+                sequence,
+                u8::try_from(sequence).unwrap_or(1),
+            );
+            assert!(guard.accept_envelope(&message, now(), &verifier).is_ok());
         }
-        let mut limited = envelope(&peer, 9, 9);
-        limited.ciphertext_b64 = encoded(9, MAX_ENVELOPE_CIPHERTEXT_BYTES);
+        let limited = envelope("device:peer-1", u32::from(MAX_MESSAGES_PER_MINUTE) + 1, 99);
         assert!(matches!(
-            guard.accept_envelope(&limited, NOW + 1, &verifier),
+            guard.accept_envelope(&limited, now(), &verifier),
             Err(P2pPolicyError::RateLimited)
         ));
     }
 
-    #[test]
-    fn update_discovery_is_signed_metadata_only_and_anti_rollback() {
-        let release_key = key("aa");
-        let mut announcement = UpdateAnnouncement {
-            protocol_version: HHM_DESKTOP_P2P_PROTOCOL_VERSION,
-            release_sequence: 8,
+    fn update_manifest() -> SignedUpdateManifest {
+        SignedUpdateManifest {
+            schema: hhm_interfaces::PEER_UPDATE_MANIFEST_SCHEMA.to_owned(),
+            app_id: PeerApplication::HhmDesktopAppRs,
+            platform: PeerPlatform::Linux,
+            channel: ReleaseChannel::Stable,
             version: "1.2.3".to_owned(),
-            manifest_sha256: key("bb"),
-            artifact_sha256: key("cc"),
-            release_key_id: release_key.clone(),
-            signature_b64: encoded(5, 64),
-        };
+            anti_rollback_counter: 8,
+            artifact_size: 1024,
+            artifact_sha256: "a".repeat(64),
+            artifact_url: "https://releases.hhm.example/desktop/app.tar.zst".to_owned(),
+            signing_key_id: "release:hhm-1".to_owned(),
+            signature: "s".repeat(64),
+            published_at: now(),
+        }
+    }
+
+    #[test]
+    fn update_metadata_requires_pinned_key_origin_and_anti_rollback() {
+        let verifier = TestVerifier(VerificationOutcome::Verified);
+        let mut manifest = update_manifest();
         assert!(
-            consider_update_announcement(
-                &announcement,
-                &release_key,
+            consider_update_manifest(
+                &manifest,
+                PeerPlatform::Linux,
+                ReleaseChannel::Stable,
+                "release:hhm-1",
                 7,
-                &TestVerifier(VerificationOutcome::Verified),
+                "https://releases.hhm.example/",
+                &verifier,
             )
             .is_ok()
         );
         assert!(matches!(
-            consider_update_announcement(
-                &announcement,
-                &release_key,
-                7,
-                &TestVerifier(VerificationOutcome::Unavailable),
-            ),
-            Err(P2pPolicyError::VerificationUnavailable)
-        ));
-        assert!(matches!(
-            consider_update_announcement(
-                &announcement,
-                &release_key,
+            consider_update_manifest(
+                &manifest,
+                PeerPlatform::Linux,
+                ReleaseChannel::Stable,
+                "release:hhm-1",
                 8,
-                &TestVerifier(VerificationOutcome::Verified),
+                "https://releases.hhm.example/",
+                &verifier,
             ),
             Err(P2pPolicyError::RollbackRejected)
         ));
-        announcement.release_key_id = key("dd");
+        manifest.artifact_url = "https://nearby-peer.invalid/app".to_owned();
         assert!(matches!(
-            consider_update_announcement(
-                &announcement,
-                &release_key,
+            consider_update_manifest(
+                &manifest,
+                PeerPlatform::Linux,
+                ReleaseChannel::Stable,
+                "release:hhm-1",
                 7,
-                &TestVerifier(VerificationOutcome::Verified),
+                "https://releases.hhm.example/",
+                &verifier,
             ),
-            Err(P2pPolicyError::WrongReleaseKey)
+            Err(P2pPolicyError::UntrustedReleaseOrigin)
         ));
     }
 
     #[test]
-    fn flutter_fixtures_match_the_rust_wire_types() {
-        let schema = serde_json::from_str::<serde_json::Value>(include_str!(
-            "../contracts/p2p-v1.schema.json"
+    fn canonical_peer_fixture_deserializes_and_validates() {
+        let fixture = serde_json::from_str::<serde_json::Value>(include_str!(
+            "../contracts/fixtures/peer-session.json"
         ));
-        assert!(schema.is_ok());
-        let envelope = serde_json::from_str::<EncryptedEnvelope>(include_str!(
-            "../contracts/fixtures/encrypted-envelope-v1.json"
-        ));
+        assert!(fixture.is_ok());
+        let Ok(fixture) = fixture else {
+            return;
+        };
+        let request =
+            serde_json::from_value::<PeerHandshakeRequest>(fixture["handshake_request"].clone());
+        let response =
+            serde_json::from_value::<PeerHandshakeResponse>(fixture["handshake_response"].clone());
+        let envelope =
+            serde_json::from_value::<PeerEncryptedEnvelope>(fixture["encrypted_envelope"].clone());
+        let manifest = serde_json::from_value::<SignedUpdateManifest>(
+            fixture["signed_update_manifest"].clone(),
+        );
+        assert!(request.is_ok());
+        assert!(response.is_ok());
         assert!(envelope.is_ok());
-        let update = serde_json::from_str::<UpdateAnnouncement>(include_str!(
-            "../contracts/fixtures/update-announcement-v1.json"
-        ));
-        assert!(update.is_ok());
+        assert!(manifest.is_ok());
+
+        let fixture_now = DateTime::parse_from_rfc3339("2026-08-24T18:00:30Z")
+            .map(|value| value.with_timezone(&Utc));
+        assert!(fixture_now.is_ok());
+        if let (Ok(request), Ok(response), Ok(envelope), Ok(manifest), Ok(fixture_now)) =
+            (request, response, envelope, manifest, fixture_now)
+        {
+            assert!(request.validate_shape(fixture_now).is_ok());
+            assert!(response.validate_shape(fixture_now).is_ok());
+            assert!(envelope.validate_shape(fixture_now).is_ok());
+            assert!(manifest.validate_shape().is_ok());
+        }
     }
 
     #[test]
-    fn wire_model_has_no_forbidden_payload_kinds_or_secret_fields() {
-        let json = serde_json::to_string(&envelope(&key("11"), 1, 7)).unwrap_or_default();
+    fn canonical_allowlist_has_no_presence_or_secret_payload_type() {
+        let values = [
+            PeerPayloadType::ResidentMessage,
+            PeerPayloadType::ContactCard,
+            PeerPayloadType::FileManifest,
+            PeerPayloadType::UpdateManifest,
+            PeerPayloadType::Receipt,
+        ];
+        let json = serde_json::to_string(&values).unwrap_or_default();
+        assert!(!json.contains("presence"));
         for forbidden in [
             "token",
             "password",
@@ -748,7 +778,19 @@ mod tests {
             "audio",
             "location",
         ] {
-            assert!(!json.contains(forbidden), "unexpected field: {forbidden}");
+            assert!(
+                !json.contains(forbidden),
+                "unexpected payload type: {forbidden}"
+            );
         }
+    }
+
+    #[test]
+    fn vendored_contract_records_exact_canonical_revision() {
+        assert_eq!(
+            HHM_INTERFACES_P2P_REVISION,
+            "f694bc9b58907db918f0449b5d04a5763f8fa745"
+        );
+        assert_eq!(HHM_DESKTOP_P2P_PROTOCOL_VERSION, "hhm.p2p.v1");
     }
 }

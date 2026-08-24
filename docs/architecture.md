@@ -24,9 +24,10 @@ Slint/winit skin       Flutter desktop       future native skin
   client artifact is publicly consumable; this module does not parse or verify
   tokens and cannot attach the server-only introspection credential.
 - `src/observability.rs` owns bounded Ores/OpenTelemetry events.
-- `src/p2p.rs` owns portable consent, session, envelope, replay/rate, and signed
-  update-metadata policy. It owns no transport, cryptographic keys, decryption,
-  artifact download, code loading, or installer behavior.
+- `src/p2p.rs` applies desktop consent, session, replay/rate, and signed-update
+  policy over the exact `hhm-interfaces` wire types. It owns no transport,
+  cryptographic keys, decryption, artifact download, code loading, or installer
+  behavior.
 - `src/main.rs` and `ui/app.slint` are the first UI skin. They do not own
   identity, product authorization, or door-transition decisions.
 

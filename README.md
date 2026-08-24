@@ -20,7 +20,7 @@ shell can reuse the same bounded state contract.
 | Supabase | Documented credential-authority boundary; platform sign-in adapter is future work |
 | Visitor sign-in/sign-out QR | Backend-issued 1–60 second lease metadata contract; QR rendering/network adapter is future work |
 | Bluetooth proximity | Opt-in display/request hint; native BLE adapter is future work |
-| Portable P2P | Consent/session/replay/rate/update-metadata policy, schema, and adversarial tests; crypto/transport adapters are release gates |
+| Portable P2P | Canonical `hhm-interfaces` contract plus stricter consent/session/replay/rate/update policy and adversarial tests; crypto/transport adapters are release gates |
 | Observability | Bounded Ores/OpenTelemetry structured transitions, pinned to an immutable Git revision |
 | Configuration | SOPS+age ciphertext under `env/enc`, audited through Just and available in a locked Nix shell |
 
@@ -111,10 +111,11 @@ and Ores logging are declared as Zed dependencies installed under
 `.vendor/.zed`. A `.zpkg.lock` is committed only after a real successful Zed
 resolver run; it is never fabricated from Git metadata.
 
-The Cargo Git dependency for Ores is pinned to a reviewed immutable commit, so
-a branch movement cannot silently change a build. Shared Auth remains an
-official-client Zed dependency and release gate rather than a private Cargo Git
-dependency that would require leaking repository credentials into public CI.
+The Cargo Git dependencies for Ores and the public `hhm-interfaces` contract
+are pinned to reviewed immutable commits, so branch movement cannot silently
+change a build. Shared Auth remains an official-client Zed dependency and
+release gate rather than a private Cargo Git dependency that would require
+leaking repository credentials into public CI.
 
 ## Encrypted configuration
 
