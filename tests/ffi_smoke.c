@@ -8,6 +8,11 @@ int main(void) {
     fputs("ABI version mismatch\n", stderr);
     return 1;
   }
+  if (hhm_desktop_p2p_protocol_version() !=
+      HHM_DESKTOP_P2P_PROTOCOL_VERSION) {
+    fputs("P2P protocol version mismatch\n", stderr);
+    return 1;
+  }
 
   HhmDesktopHandle *handle = hhm_desktop_handle_new();
   if (handle == NULL) {
