@@ -10,15 +10,16 @@ use std::{collections::VecDeque, fmt};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
 pub use hhm_interfaces::{
-    PEER_PROTOCOL_VERSION, PeerApplication, PeerCapability, PeerDecision, PeerEncryptedEnvelope,
-    PeerHandshakeRequest, PeerHandshakeResponse, PeerPayloadType, PeerPlatform, ReleaseChannel,
-    SignedUpdateManifest,
+    CONTACT_CARD_SCHEMA, ContactCard, P2pJsonRecord, PEER_PROTOCOL_VERSION, PEER_RECEIPT_SCHEMA,
+    PeerApplication, PeerCapability, PeerDecision, PeerEncryptedEnvelope, PeerHandshakeRequest,
+    PeerHandshakeResponse, PeerPayloadType, PeerPlatform, PeerReceipt, RESIDENT_MESSAGE_SCHEMA,
+    ReleaseChannel, ResidentMessage, SignedUpdateManifest,
 };
 use url::Url;
 use uuid::Uuid;
 
 pub const HHM_DESKTOP_P2P_PROTOCOL_VERSION: &str = PEER_PROTOCOL_VERSION;
-pub const HHM_INTERFACES_P2P_REVISION: &str = "f694bc9b58907db918f0449b5d04a5763f8fa745";
+pub const HHM_INTERFACES_P2P_REVISION: &str = "ffc1df71d1d89202b431f4830cc2a43e4a451da3";
 pub const MAX_ENVELOPE_CIPHERTEXT_BYTES: usize = 32 * 1024;
 pub const MAX_MESSAGES_PER_MINUTE: u16 = 30;
 pub const MAX_BYTES_PER_MINUTE: usize = 256 * 1024;
@@ -268,10 +269,61 @@ impl PeerSessionGuard {
             PeerPayloadType::ContactCard => Some(PeerCapability::ContactCard),
             PeerPayloadType::FileManifest => Some(PeerCapability::FileManifest),
             PeerPayloadType::UpdateManifest => Some(PeerCapability::UpdateManifest),
-            PeerPayloadType::Receipt => None,
+            PeerPayloadType::Receipt => {
+                return self.selected_capabilities.iter().any(|capability| {
+                    matches!(
+                        capability,
+                        PeerCapability::ResidentMessage | PeerCapability::ContactCard
+                    )
+                });
+            }
         };
         capability.is_none_or(|value| self.selected_capabilities.contains(&value))
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PeerJsonSharingConsent {
+    pub resident_messages: bool,
+    pub contact_cards: bool,
+    pub receipts: bool,
+}
+
+impl PeerJsonSharingConsent {
+    fn allows(self, payload_type: PeerPayloadType) -> bool {
+        match payload_type {
+            PeerPayloadType::ResidentMessage => self.resident_messages,
+            PeerPayloadType::ContactCard => self.contact_cards,
+            PeerPayloadType::Receipt => self.receipts,
+            PeerPayloadType::FileManifest | PeerPayloadType::UpdateManifest => false,
+        }
+    }
+}
+
+/// Validates a decrypted canonical JSON record before replay state is committed.
+/// Callers must perform this after AEAD authentication and before
+/// [`PeerSessionGuard::accept_envelope`]. The envelope type and inner schema
+/// must match, and explicit local sharing consent defaults off.
+///
+/// # Errors
+///
+/// Rejects disabled sharing, type/schema mismatch, expiry, unsafe URLs, unknown
+/// fields, arbitrary JSON, and other canonical record validation failures.
+pub fn validate_peer_json_record(
+    envelope_payload_type: PeerPayloadType,
+    record: &P2pJsonRecord,
+    consent: PeerJsonSharingConsent,
+    now: DateTime<Utc>,
+) -> Result<(), P2pPolicyError> {
+    if !consent.allows(envelope_payload_type) {
+        return Err(P2pPolicyError::PayloadConsentRequired);
+    }
+    if record.payload_type() != envelope_payload_type {
+        return Err(P2pPolicyError::PayloadTypeMismatch);
+    }
+    record
+        .validate_shape(now)
+        .map_err(|_| P2pPolicyError::InvalidJsonRecord)
 }
 
 /// Verifies canonical peer-discovered update metadata. An accepted result is
@@ -333,6 +385,9 @@ pub enum P2pPolicyError {
     SessionExpired,
     SessionMismatch,
     CapabilityDenied,
+    PayloadConsentRequired,
+    PayloadTypeMismatch,
+    InvalidJsonRecord,
     InvalidEnvelopeShape,
     ReplayDetected,
     EnvelopeExpired,
@@ -363,6 +418,9 @@ impl fmt::Display for P2pPolicyError {
             Self::SessionExpired => "peer session expired",
             Self::SessionMismatch => "peer session does not match",
             Self::CapabilityDenied => "peer payload capability was not selected",
+            Self::PayloadConsentRequired => "peer JSON sharing consent is required",
+            Self::PayloadTypeMismatch => "peer envelope and JSON record types do not match",
+            Self::InvalidJsonRecord => "peer JSON record is invalid",
             Self::InvalidEnvelopeShape => "invalid canonical encrypted envelope shape",
             Self::ReplayDetected => "peer envelope replay detected",
             Self::EnvelopeExpired => "peer envelope expired",
@@ -759,6 +817,55 @@ mod tests {
     }
 
     #[test]
+    fn canonical_json_records_require_matching_type_and_explicit_consent() {
+        let fixture = serde_json::from_str::<serde_json::Value>(include_str!(
+            "../contracts/fixtures/p2p-json-records.json"
+        ))
+        .unwrap_or_default();
+        let record = serde_json::from_value::<P2pJsonRecord>(fixture["resident_message"].clone());
+        assert!(record.is_ok());
+        let record_now = DateTime::parse_from_rfc3339("2026-08-24T16:01:00Z")
+            .map(|value| value.with_timezone(&Utc))
+            .unwrap_or_default();
+        if let Ok(record) = record {
+            assert!(matches!(
+                validate_peer_json_record(
+                    PeerPayloadType::ResidentMessage,
+                    &record,
+                    PeerJsonSharingConsent::default(),
+                    record_now,
+                ),
+                Err(P2pPolicyError::PayloadConsentRequired)
+            ));
+            let consent = PeerJsonSharingConsent {
+                resident_messages: true,
+                ..PeerJsonSharingConsent::default()
+            };
+            assert!(
+                validate_peer_json_record(
+                    PeerPayloadType::ResidentMessage,
+                    &record,
+                    consent,
+                    record_now,
+                )
+                .is_ok()
+            );
+            assert!(matches!(
+                validate_peer_json_record(
+                    PeerPayloadType::ContactCard,
+                    &record,
+                    PeerJsonSharingConsent {
+                        contact_cards: true,
+                        ..PeerJsonSharingConsent::default()
+                    },
+                    record_now,
+                ),
+                Err(P2pPolicyError::PayloadTypeMismatch)
+            ));
+        }
+    }
+
+    #[test]
     fn canonical_allowlist_has_no_presence_or_secret_payload_type() {
         let values = [
             PeerPayloadType::ResidentMessage,
@@ -789,7 +896,7 @@ mod tests {
     fn vendored_contract_records_exact_canonical_revision() {
         assert_eq!(
             HHM_INTERFACES_P2P_REVISION,
-            "f694bc9b58907db918f0449b5d04a5763f8fa745"
+            "ffc1df71d1d89202b431f4830cc2a43e4a451da3"
         );
         assert_eq!(HHM_DESKTOP_P2P_PROTOCOL_VERSION, "hhm.p2p.v1");
     }

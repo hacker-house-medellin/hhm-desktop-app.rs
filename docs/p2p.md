@@ -2,7 +2,7 @@
 
 `hhm-interfaces` is the sole wire-contract authority. This repository consumes
 the public Rust crate at exact commit
-`f694bc9b58907db918f0449b5d04a5763f8fa745` and vendors byte-for-byte copies
+`ffc1df71d1d89202b431f4830cc2a43e4a451da3` and vendors byte-for-byte copies
 for non-Rust clients:
 
 - `contracts/p2p-v1.schema.json` is upstream
@@ -10,7 +10,12 @@ for non-Rust clients:
   `94e72f5fbf65815f28ba718cabceb93ebf9b744c`);
 - `contracts/fixtures/peer-session.json` is upstream
   `fixtures/peer-session.json` (Git blob
-  `75df4f5435b67d278f8ea19286b192e8eca0cf10`).
+  `75df4f5435b67d278f8ea19286b192e8eca0cf10`);
+- `contracts/fixtures/p2p-json-records.json` and
+  `contracts/fixtures/doorway-observation.json` are byte-identical upstream v1
+  fixtures with SHA-256 digests
+  `d49aa5ee80e33603f82700b98488bf67af20885fe87c2ab8698647662aab9ba0`
+  and `b4f70e954accecfec58fcbe9e8504f1bf7be104cfacdd209cd1c80c06773fb63`.
 
 The compatibility test deserializes every canonical fixture object through the
 pinned `hhm-interfaces` types and runs their shape validation. The protocol
@@ -57,7 +62,13 @@ stricter than the shared ceiling:
   128 nonces in addition to the monotonic sequence.
 
 Failed cryptographic verification does not consume a nonce or advance the
-sequence, avoiding an unauthenticated denial-of-service primitive.
+sequence, avoiding an unauthenticated denial-of-service primitive. Decrypted
+contact cards, plain-text resident messages, and receipts must additionally
+pass `validate_peer_json_record` before the envelope is committed: local
+sharing consent defaults off, envelope type must equal the inner schema, and
+the canonical validator rejects unknown fields, non-HTTPS website values,
+control characters, expiry, and lifetimes over ten minutes. Arbitrary JSON,
+HTML execution, and implicit file transfer are not extensions.
 
 Passwords, access or refresh tokens, cookies, service credentials, private
 keys, OTP/TOTP values or seeds, biometrics, door challenges, visitor QR bearer

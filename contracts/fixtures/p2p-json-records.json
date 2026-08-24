@@ -1,0 +1,36 @@
+{
+  "contact_card": {
+    "schema": "hhm.contact-card.v1",
+    "record_id": "0ad352ae-5aec-4cbd-abd5-790987f2c6b4",
+    "display_alias": "Ada",
+    "fields": [
+      {
+        "kind": "github",
+        "value": "ada-resident"
+      },
+      {
+        "kind": "website",
+        "value": "https://example.test/ada"
+      }
+    ],
+    "created_at": "2026-08-24T16:00:00Z",
+    "expires_at": "2026-08-24T16:10:00Z"
+  },
+  "resident_message": {
+    "schema": "hhm.resident-message.v1",
+    "record_id": "d6f61ed1-6ee6-49b5-a125-e94d495ba5f2",
+    "topic": "house_coordination",
+    "format": "plain_text",
+    "text": "The front-door intercom needs a battery check.",
+    "created_at": "2026-08-24T16:00:05Z",
+    "expires_at": "2026-08-24T16:10:05Z"
+  },
+  "receipt": {
+    "schema": "hhm.receipt.v1",
+    "record_id": "70920cff-cabe-4f87-8f7a-775fb02c9f49",
+    "acknowledged_record_id": "d6f61ed1-6ee6-49b5-a125-e94d495ba5f2",
+    "status": "received",
+    "created_at": "2026-08-24T16:00:07Z",
+    "expires_at": "2026-08-24T16:02:07Z"
+  }
+}
