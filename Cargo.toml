@@ -1,0 +1,44 @@
+[package]
+name = "hhm-desktop-app"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "Rust-native desktop companion and C ABI for Hacker House Medellín"
+license = "MIT"
+repository = "https://github.com/hacker-house-medellin/hhm-desktop-app.rs"
+publish = false
+
+[lib]
+name = "hhm_desktop_app"
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[features]
+default = ["shared-auth-client"]
+shared-auth-client = ["dep:shared-auth-client"]
+
+[dependencies]
+oresoftware-next-loggers = { git = "https://github.com/ores-otel/ores.otel.log", rev = "ca176fb6768a9750d262a536952268625ffd3a8a" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+shared-auth-client = { git = "https://github.com/shared-auth/shared-auth-clients", rev = "7aab653a1822e26122a16f8d31e501815fe86beb", package = "shared-auth-client", optional = true }
+slint = { version = "=1.17.1", default-features = false, features = ["backend-winit", "compat-1-2", "renderer-software", "std"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[build-dependencies]
+slint-build = "=1.17.1"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = "deny"
+pedantic = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

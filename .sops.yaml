@@ -1,0 +1,28 @@
+# Public age recipients for encrypted HHM desktop build/release configuration.
+# Private age keys and decrypted values must never enter this repository.
+keys:
+  - &alex age1qrnva7lnv2jzww6ah5au0cqm4wkvkm5shpzflekdcm4nlu6wnyfqgfaxft
+  - &operator age1s8lcnaxn9g77s6j4g7p24w6sgvllpue0lzrsvp3xk02k2gwjj5ssnkp39q
+  - &recovery age1txv6jzlds2s03advmdtnm5l93qh4rkqs50nwvzk9yfvsartzue8se8t7jv
+
+creation_rules:
+  - path_regex: env/enc/dev\.env\.enc$
+    key_groups:
+      - age:
+          - *alex
+          - *operator
+          - *recovery
+
+  - path_regex: env/enc/prod\.env\.enc$
+    key_groups:
+      - age:
+          - *operator
+          - *alex
+          - *recovery
+
+  - path_regex: env/enc/.*\.env\.enc$
+    key_groups:
+      - age:
+          - *alex
+          - *operator
+          - *recovery

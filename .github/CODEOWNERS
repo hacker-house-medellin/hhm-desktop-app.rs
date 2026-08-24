@@ -1,0 +1,6 @@
+* @ORESoftware
+
+/src/ffi.rs @ORESoftware
+/include/ @ORESoftware
+/.sops.yaml @ORESoftware
+/env/enc/ @ORESoftware

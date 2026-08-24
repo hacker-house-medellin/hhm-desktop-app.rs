@@ -1,0 +1,41 @@
+[package]
+org = "hacker-house-medellin"
+name = "hhm-desktop-app"
+version = "0.1.0"
+description = "Rust-native HHM desktop companion and stable C ABI"
+license = "MIT"
+keywords = ["desktop", "rust", "ffi", "slint", "flutter"]
+
+[package.repository]
+vcs = "git"
+url = "https://github.com/hacker-house-medellin/hhm-desktop-app.rs"
+
+[install]
+dir = ".vendor/.zed"
+
+[dependencies]
+"hacker-house-medellin/hhm-interfaces" = "^0.1.0"
+"hacker-house-medellin/hhm-clients" = "^0.1.0"
+"hacker-house-medellin/hhm-sync" = "^0.1.0"
+"shared-auth/shared-auth-clients" = "^0.1.0"
+"oresoftware/next-loggers" = "^0.1.0"
+
+[publish]
+include_readme = true
+tag_format = "v{version}"
+exclude = [
+  ".env",
+  ".env.*",
+  ".vendor/.zed/**",
+  "env/dec/**",
+  "target/**",
+  "*.log",
+]
+
+[scripts]
+test = "cargo test --all-features"
+verify = "just verify"
+
+[targets.repository]
+dir = "."
+adapter = "none"

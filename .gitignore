@@ -1,0 +1,16 @@
+/target/
+/.vendor/.zed/
+/zed_modules/
+/.zed/
+/env/dec/
+/.env
+*.env
+**/*.env
+!/.env.example
+*.agekey
+*.age-key
+keys.txt
+*.log
+.DS_Store
+*.dSYM/
+*.app/

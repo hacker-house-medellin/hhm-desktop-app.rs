@@ -1,0 +1,104 @@
+import { VerticalBox } from "std-widgets.slint";
+
+component StatusCard inherits Rectangle {
+    in property <string> heading;
+    in property <string> value;
+    in property <string> detail;
+
+    height: 86px;
+    border-radius: 12px;
+    background: #172630;
+
+    VerticalBox {
+        padding: 14px;
+        spacing: 3px;
+
+        Text {
+            text: root.heading;
+            color: #7dd3c7;
+            font-size: 13px;
+        }
+        Text {
+            text: root.value;
+            color: #f7f1e8;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        Text {
+            text: root.detail;
+            color: #9eb5c4;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "HHM Desktop";
+    preferred-width: 720px;
+    preferred-height: 560px;
+    background: #0d1720;
+
+    in property <string> auth-status: "Anonymous";
+    in property <string> access-status: "Not yet checked";
+    in property <string> proximity-status: "No opt-in signal";
+    in property <string> qr-status: "No backend-issued visitor QR lease";
+    in property <bool> presence-request-ready: false;
+
+    VerticalBox {
+        padding: 32px;
+        spacing: 18px;
+
+        Text {
+            text: "Hacker House Medellín";
+            color: #f7f1e8;
+            font-size: 30px;
+            font-weight: 700;
+        }
+
+        Text {
+            text: "Rust desktop companion · Slint over winit · no Qt";
+            color: #9eb5c4;
+            font-size: 15px;
+        }
+
+        StatusCard {
+            heading: "Identity";
+            value: root.auth-status;
+            detail: "Shared Auth proves identity; the desktop never receives an introspection service credential.";
+        }
+
+        StatusCard {
+            heading: "HHM access";
+            value: root.access-status;
+            detail: "Resident and visitor permissions remain authoritative in the HHM backend.";
+        }
+
+        StatusCard {
+            heading: "Door proximity";
+            value: root.proximity-status;
+            detail: "Bluetooth is an opt-in hint, never authentication or proof of entry/exit.";
+        }
+
+        StatusCard {
+            heading: "Visitor QR";
+            value: root.qr-status;
+            detail: "Only the backend issues rotating sign-in/sign-out QR payloads; this UI tracks their bounded lease.";
+        }
+
+        Rectangle {
+            height: 48px;
+            border-radius: 10px;
+            background: root.presence-request-ready ? #1f6f5f : #25333d;
+
+            Text {
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: #f7f1e8;
+                text: root.presence-request-ready
+                    ? "Ready to request a backend presence transition"
+                    : "Presence request remains fail-closed";
+            }
+        }
+    }
+}
