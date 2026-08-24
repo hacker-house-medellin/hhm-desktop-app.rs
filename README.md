@@ -16,16 +16,23 @@ shell can reuse the same bounded state contract.
 | Linux/macOS/Windows native shell | Slint/winit shell compiles; packaging is future work |
 | Rust library | `rlib`, `cdylib`, and `staticlib` outputs |
 | Dart/other-skin integration | Versioned C ABI plus generated C header |
-| Shared Auth | Official typed Rust client pinned to an immutable Git revision; public-client boundary only |
+| Shared Auth | Fail-closed public configuration boundary; official typed client artifact is a release gate |
 | Supabase | Documented credential-authority boundary; platform sign-in adapter is future work |
 | Visitor sign-in/sign-out QR | Backend-issued 1–60 second lease metadata contract; QR rendering/network adapter is future work |
 | Bluetooth proximity | Opt-in display/request hint; native BLE adapter is future work |
+| Portable P2P | Consent/session/replay/rate/update-metadata policy, schema, and adversarial tests; crypto/transport adapters are release gates |
 | Observability | Bounded Ores/OpenTelemetry structured transitions, pinned to an immutable Git revision |
 | Configuration | SOPS+age ciphertext under `env/enc`, audited through Just and available in a locked Nix shell |
 
 This repository does not yet package installers, scan BLE beacons, draw an
 opaque QR payload, or call HHM's presence API. Those are explicit follow-on
 adapters, not simulated behavior.
+
+Authentication is also intentionally unavailable in this public build: the
+current upstream Shared Auth source cannot be fetched by unauthenticated public
+CI. The app does not add a repository token, ad-hoc JWT parser, introspection
+call, or production success stub. Shipping authentication is gated on a
+publicly consumable official typed client artifact declared through Zed.
 
 ## Security model
 
@@ -50,7 +57,8 @@ domain/FFI snapshot contains only purpose and a bounded remaining lifetime; it
 does not accept, persist, serialize, or log the opaque payload.
 
 See [`docs/architecture.md`](docs/architecture.md),
-[`docs/ffi.md`](docs/ffi.md), and [`docs/security.md`](docs/security.md).
+[`docs/ffi.md`](docs/ffi.md), [`docs/p2p.md`](docs/p2p.md), and
+[`docs/security.md`](docs/security.md).
 
 ## Build and run
 
@@ -103,8 +111,10 @@ and Ores logging are declared as Zed dependencies installed under
 `.vendor/.zed`. A `.zpkg.lock` is committed only after a real successful Zed
 resolver run; it is never fabricated from Git metadata.
 
-The Cargo Git dependencies for Shared Auth and Ores are also pinned to reviewed
-immutable commits, so a branch movement cannot silently change a build.
+The Cargo Git dependency for Ores is pinned to a reviewed immutable commit, so
+a branch movement cannot silently change a build. Shared Auth remains an
+official-client Zed dependency and release gate rather than a private Cargo Git
+dependency that would require leaking repository credentials into public CI.
 
 ## Encrypted configuration
 

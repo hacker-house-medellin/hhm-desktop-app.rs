@@ -8,8 +8,9 @@ pub mod auth;
 pub mod domain;
 pub mod ffi;
 pub mod observability;
+pub mod p2p;
 
 pub use domain::{AppSnapshot, AuthDisplayState, DoorProximity, ProductAccess, QrLease, QrPurpose};
 
 /// Major/minor ABI version encoded as `major << 16 | minor`.
-pub const HHM_DESKTOP_ABI_VERSION: u32 = 1 << 16;
+pub const HHM_DESKTOP_ABI_VERSION: u32 = (1 << 16) | 1;
