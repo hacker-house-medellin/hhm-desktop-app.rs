@@ -14,7 +14,7 @@
           inherit system;
           overlays = [ ores-sops.overlays.default ];
         };
-        linuxUiPackages = pkgs.lib.optionals pkgs.stdenv.isLinux (with pkgs; [
+        linuxUiPackages = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (with pkgs; [
           fontconfig
           freetype
           libxkbcommon
@@ -31,7 +31,7 @@
             age
             cargo
             cargo-audit
-            cbindgen
+            rust-cbindgen
             clang
             clippy
             git

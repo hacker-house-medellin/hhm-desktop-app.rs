@@ -15,7 +15,7 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 [dependencies]
 base64 = "0.22"
 chrono = "0.4"
-hhm-interfaces = { git = "https://github.com/hacker-house-medellin/hhm-interfaces", rev = "f694bc9b58907db918f0449b5d04a5763f8fa745" }
+hhm-interfaces = { git = "https://github.com/hacker-house-medellin/hhm-interfaces", rev = "ffc1df71d1d89202b431f4830cc2a43e4a451da3" }
 oresoftware-next-loggers = { git = "https://github.com/ores-otel/ores.otel.log", rev = "ca176fb6768a9750d262a536952268625ffd3a8a" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
