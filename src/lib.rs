@@ -6,6 +6,7 @@
 
 pub mod auth;
 pub mod domain;
+pub mod doorway;
 pub mod ffi;
 pub mod observability;
 pub mod p2p;

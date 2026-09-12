@@ -30,7 +30,7 @@ ffi-check:
     mkdir -p target/generated
     cbindgen --quiet --config cbindgen.toml --crate hhm-desktop-app --output target/generated/hhm_desktop.h
     cmp include/hhm_desktop.h target/generated/hhm_desktop.h
-    cc -std=c11 -Wall -Wextra -Werror -fsyntax-only -x c include/hhm_desktop.h
+    cc -std=c11 -Wall -Wextra -Werror -Wno-unused-command-line-argument -fsyntax-only -x c include/hhm_desktop.h
 
 ffi-smoke:
     #!/usr/bin/env bash
