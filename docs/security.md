@@ -36,10 +36,11 @@
 - P2P requires explicit peer selection, short-lived consent/session state,
   device-bound cryptographic verification, allowlisted E2E-encrypted envelopes,
   and expiry/replay/rate limits. Invalid or unavailable crypto fails closed.
-- Peer update discovery carries signed digests/sequence metadata only. A pinned
-  official release key and anti-rollback check are mandatory; peer-provided
-  artifact bytes, URLs, scripts, libraries, or install instructions are never
-  accepted or executed.
+- Peer update discovery carries the canonical signed manifest only. Its URL is
+  accepted solely when it has an allowlisted official HTTPS origin, the pinned
+  project release key verifies it, and the anti-rollback counter increases.
+  Peer-provided artifact bytes, scripts, libraries, and install instructions
+  are never accepted or executed.
 
 ## Sensitive data
 
