@@ -15,6 +15,7 @@ use crate::{
     HHM_DESKTOP_ABI_VERSION,
     domain::{AppSnapshot, AuthDisplayState, DoorProximity, ProductAccess, QrLease, QrPurpose},
     observability::Observability,
+    p2p::HHM_DESKTOP_P2P_PROTOCOL_VERSION,
 };
 
 #[repr(i32)]
@@ -45,6 +46,12 @@ impl HhmDesktopHandle {
 #[unsafe(no_mangle)]
 pub extern "C" fn hhm_desktop_abi_version() -> u32 {
     HHM_DESKTOP_ABI_VERSION
+}
+
+/// Returns the portable P2P wire-policy version shared with Flutter.
+#[unsafe(no_mangle)]
+pub extern "C" fn hhm_desktop_p2p_protocol_version() -> u32 {
+    HHM_DESKTOP_P2P_PROTOCOL_VERSION
 }
 
 #[unsafe(no_mangle)]
