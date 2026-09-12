@@ -15,6 +15,11 @@
 - This public client must not call protected introspection because it cannot
   safely hold the independent service credential. Use the official public
   exchange/verify flow and backend guards.
+- Authentication remains fail-closed and unavailable until the official typed
+  Shared Auth client is published in a form public CI can consume. Do not add an
+  ad-hoc JWT/JWKS parser, token-verification implementation, private repository
+  credential, introspection call, or production success stub to bypass that
+  release gate.
 
 ## QR and proximity
 
@@ -28,6 +33,14 @@
   crossed a doorway.
 - A presence change is shown as completed only after the backend confirms its
   authoritative record.
+- P2P requires explicit peer selection, short-lived consent/session state,
+  device-bound cryptographic verification, allowlisted E2E-encrypted envelopes,
+  and expiry/replay/rate limits. Invalid or unavailable crypto fails closed.
+- Peer update discovery carries the canonical signed manifest only. Its URL is
+  accepted solely when it has an allowlisted official HTTPS origin, the pinned
+  project release key verifies it, and the anti-rollback counter increases.
+  Peer-provided artifact bytes, scripts, libraries, and install instructions
+  are never accepted or executed.
 
 ## Sensitive data
 

@@ -47,6 +47,14 @@ pub extern "C" fn hhm_desktop_abi_version() -> u32 {
     HHM_DESKTOP_ABI_VERSION
 }
 
+/// Returns the static NUL-terminated canonical P2P protocol identifier.
+///
+/// The pointer remains valid for the life of the process and must not be freed.
+#[unsafe(no_mangle)]
+pub extern "C" fn hhm_desktop_p2p_protocol_version() -> *const c_char {
+    c"hhm.p2p.v1".as_ptr()
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn hhm_desktop_handle_new() -> *mut HhmDesktopHandle {
     catch_unwind(AssertUnwindSafe(|| {
