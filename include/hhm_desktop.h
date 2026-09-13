@@ -10,7 +10,15 @@
 #include <stdlib.h>
 
 // Major/minor ABI version encoded as `major << 16 | minor`.
-#define HHM_DESKTOP_ABI_VERSION (1 << 16)
+#define HHM_DESKTOP_ABI_VERSION ((1 << 16) | 1)
+
+#define HHM_DESKTOP_P2P_PROTOCOL_VERSION 1
+
+#define MAX_ENVELOPE_CIPHERTEXT_BYTES (32 * 1024)
+
+#define MAX_MESSAGES_PER_MINUTE 30
+
+#define MAX_BYTES_PER_MINUTE (256 * 1024)
 
 enum HhmDesktopStatus
 #if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
@@ -39,6 +47,9 @@ extern "C" {
 #endif // __cplusplus
 
 uint32_t hhm_desktop_abi_version(void);
+
+// Returns the portable P2P wire-policy version shared with Flutter.
+uint32_t hhm_desktop_p2p_protocol_version(void);
 
 struct HhmDesktopHandle *hhm_desktop_handle_new(void);
 

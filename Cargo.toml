@@ -12,18 +12,15 @@ publish = false
 name = "hhm_desktop_app"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
-[features]
-default = ["shared-auth-client"]
-shared-auth-client = ["dep:shared-auth-client"]
-
 [dependencies]
+base64 = "0.22"
 oresoftware-next-loggers = { git = "https://github.com/ores-otel/ores.otel.log", rev = "ca176fb6768a9750d262a536952268625ffd3a8a" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-shared-auth-client = { git = "https://github.com/shared-auth/shared-auth-clients", rev = "7aab653a1822e26122a16f8d31e501815fe86beb", package = "shared-auth-client", optional = true }
 slint = { version = "=1.17.1", default-features = false, features = ["backend-winit", "compat-1-2", "renderer-software", "std"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+url = "2"
 
 [build-dependencies]
 slint-build = "=1.17.1"

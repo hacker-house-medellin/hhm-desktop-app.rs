@@ -14,6 +14,14 @@ including semantic conflict resolution and the `dev` integration branch.
 - Shared Auth establishes identity and assurance. HHM's backend owns resident,
   visitor, door, and presence authorization. Never treat BLE/proximity as
   authentication or proof that an entry/exit occurred.
+- Keep authentication unavailable and fail-closed until a publicly consumable
+  official Shared Auth typed-client artifact exists. Never add an ad-hoc token
+  parser/verifier, introspection call, private repository credential, or
+  production success stub to bypass that release gate.
+- Keep P2P BLE transport separate from trust. Require explicit peer consent,
+  official device-bound verification, bounded E2E envelopes, expiry/replay/rate
+  defense, and pinned official release metadata. Never load peer-supplied code
+  or add prohibited secret/surveillance/location payload kinds.
 - Never log or place in the ABI snapshot tokens, cookies, QR payloads, beacon
   identifiers, email addresses, provider subjects, service credentials, or
   biometric material.

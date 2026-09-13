@@ -1,9 +1,12 @@
 # C ABI contract
 
-ABI version `0x0001_0000` means major 1, minor 0. Consumers must reject an
+ABI version `0x0001_0001` means major 1, minor 1. Consumers must reject an
 unknown major version. A compatible additive change increments the minor
 portion; removing or changing an exported symbol, type width, ownership rule,
 or semantic invariant increments the major portion.
+
+`hhm_desktop_p2p_protocol_version()` returns the portable schema/policy version
+without exposing a way to forge peer consent or cryptographic verification.
 
 ## Ownership and threading
 
