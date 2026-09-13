@@ -1,0 +1,59 @@
+{
+  "submission_nonce": {
+    "schema": "hhm.presence-submission-nonce.v1",
+    "audience": "hhm-presence-observation",
+    "nonce": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+    "expires_at": "2026-08-24T19:00:30Z"
+  },
+  "observation": {
+    "schema": "hhm.doorway-observation.v1",
+    "audience": "hhm-presence-observation",
+    "observation_id": "6b8160de-67a5-42d7-9cbb-f3284f88de34",
+    "submission_nonce": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+    "resident_device_key_id": "device:resident-example-1",
+    "app_id": "hhm-flutter",
+    "direction": "entry",
+    "signal_bucket": "doorway",
+    "previous_presence_sequence": 17,
+    "policy_version": "presence-policy-2026-08",
+    "challenge": {
+      "schema": "hhm.doorway-challenge.v1",
+      "house_id": "medellin-house-1",
+      "door_id": "front-door",
+      "beacon_key_id": "door-beacon:front-1",
+      "key_version": 3,
+      "challenge_id": "8fac37c7-9a50-493c-b6a4-6dcf5d5dbddb",
+      "nonce": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "direction_hint": "entry",
+      "issued_at": "2026-08-24T19:00:00Z",
+      "expires_at": "2026-08-24T19:00:20Z",
+      "signature": "SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS"
+    },
+    "corroboration": {
+      "schema": "hhm.doorway-corroboration.v1",
+      "method": "door_controller",
+      "evidence_id": "bc3e4e0b-880c-4efa-a1ee-86fb876d86a1",
+      "source_key_id": "door-controller:front-1",
+      "proof_digest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "distance_bucket": "contact",
+      "observed_at": "2026-08-24T19:00:08Z",
+      "proof": "PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP"
+    },
+    "observed_at": "2026-08-24T19:00:09Z",
+    "device_attestation": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "device_signature": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+  },
+  "decision": {
+    "schema": "hhm.presence-decision.v1",
+    "decision": "accepted",
+    "reason": "accepted",
+    "event_id": "7a242be2-f531-4438-8a90-40e581d3800b",
+    "observation_id": "6b8160de-67a5-42d7-9cbb-f3284f88de34",
+    "house_id": "medellin-house-1",
+    "door_id": "front-door",
+    "direction": "entry",
+    "presence_sequence": 18,
+    "policy_version": "presence-policy-2026-08",
+    "recorded_at": "2026-08-24T19:00:10Z"
+  }
+}
