@@ -21,6 +21,7 @@ dir = ".vendor/.zed"
 # resolve it; do not substitute an ad-hoc token implementation or CI credential.
 "shared-auth/shared-auth-clients" = "^0.1.0"
 "oresoftware/next-loggers" = "^0.1.0"
+"oresoftware/ores-desktop-app-libs" = "^0.1.0"
 
 [publish]
 include_readme = true
