@@ -13,7 +13,7 @@ name = "hhm_desktop_app"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23"
 chrono = "0.4"
 hhm-interfaces = { git = "https://github.com/hacker-house-medellin/hhm-interfaces", rev = "ffc1df71d1d89202b431f4830cc2a43e4a451da3" }
 oresoftware-next-loggers = { git = "https://github.com/ores-otel/ores.otel.log", rev = "ca176fb6768a9750d262a536952268625ffd3a8a" }
