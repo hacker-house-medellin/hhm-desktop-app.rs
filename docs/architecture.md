@@ -19,9 +19,14 @@ Slint/winit skin       Flutter desktop       future native skin
   fail-closed eligibility hint for *requesting* a presence transition.
 - `src/ffi.rs` owns the stable cross-language boundary, allocation ownership,
   integer validation, synchronization, JSON snapshot, and panic containment.
-- `src/auth.rs` owns the public Shared Auth client construction boundary. It
-  cannot attach the server-only introspection credential.
+- `src/auth.rs` validates non-secret configuration for the future official
+  Shared Auth adapter. Authentication remains unavailable until its typed
+  client artifact is publicly consumable; this module does not parse or verify
+  tokens and cannot attach the server-only introspection credential.
 - `src/observability.rs` owns bounded Ores/OpenTelemetry events.
+- `src/p2p.rs` owns portable consent, session, envelope, replay/rate, and signed
+  update-metadata policy. It owns no transport, cryptographic keys, decryption,
+  artifact download, code loading, or installer behavior.
 - `src/main.rs` and `ui/app.slint` are the first UI skin. They do not own
   identity, product authorization, or door-transition decisions.
 

@@ -24,11 +24,11 @@ audit:
 
 ffi-generate:
     mkdir -p include
-    cbindgen --config cbindgen.toml --crate hhm-desktop-app --output include/hhm_desktop.h
+    cbindgen --quiet --config cbindgen.toml --crate hhm-desktop-app --output include/hhm_desktop.h
 
 ffi-check:
     mkdir -p target/generated
-    cbindgen --config cbindgen.toml --crate hhm-desktop-app --output target/generated/hhm_desktop.h
+    cbindgen --quiet --config cbindgen.toml --crate hhm-desktop-app --output target/generated/hhm_desktop.h
     cmp include/hhm_desktop.h target/generated/hhm_desktop.h
     cc -std=c11 -Wall -Wextra -Werror -fsyntax-only -x c include/hhm_desktop.h
 

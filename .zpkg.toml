@@ -17,6 +17,8 @@ dir = ".vendor/.zed"
 "hacker-house-medellin/hhm-interfaces" = "^0.1.0"
 "hacker-house-medellin/hhm-clients" = "^0.1.0"
 "hacker-house-medellin/hhm-sync" = "^0.1.0"
+# Release gate: use this official typed artifact when the public registry can
+# resolve it; do not substitute an ad-hoc token implementation or CI credential.
 "shared-auth/shared-auth-clients" = "^0.1.0"
 "oresoftware/next-loggers" = "^0.1.0"
 

@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hacker-house-medellin/hhm-desktop-app.rs/contracts/p2p-v1.schema.json",
+  "title": "HHM portable P2P protocol v1",
+  "oneOf": [
+    { "$ref": "#/$defs/sessionOffer" },
+    { "$ref": "#/$defs/encryptedEnvelope" },
+    { "$ref": "#/$defs/updateAnnouncement" }
+  ],
+  "$defs": {
+    "hex32": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{64}$"
+    },
+    "base64url": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "sessionOffer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "peer_key_id",
+        "local_key_id",
+        "session_id_b64",
+        "challenge_nonce_b64",
+        "issued_at_unix",
+        "expires_at_unix",
+        "device_signature_b64"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "peer_key_id": { "$ref": "#/$defs/hex32" },
+        "local_key_id": { "$ref": "#/$defs/hex32" },
+        "session_id_b64": { "$ref": "#/$defs/base64url" },
+        "challenge_nonce_b64": { "$ref": "#/$defs/base64url" },
+        "issued_at_unix": { "type": "integer", "minimum": 0 },
+        "expires_at_unix": { "type": "integer", "minimum": 1 },
+        "device_signature_b64": { "$ref": "#/$defs/base64url" }
+      }
+    },
+    "encryptedEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "peer_key_id",
+        "session_id_b64",
+        "sequence",
+        "expires_at_unix",
+        "kind",
+        "aead_nonce_b64",
+        "ciphertext_b64",
+        "device_signature_b64"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "peer_key_id": { "$ref": "#/$defs/hex32" },
+        "session_id_b64": { "$ref": "#/$defs/base64url" },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "expires_at_unix": { "type": "integer", "minimum": 1 },
+        "kind": {
+          "enum": [
+            "presence_request_hint",
+            "house_notice",
+            "resident_message"
+          ]
+        },
+        "aead_nonce_b64": { "$ref": "#/$defs/base64url" },
+        "ciphertext_b64": { "$ref": "#/$defs/base64url" },
+        "device_signature_b64": { "$ref": "#/$defs/base64url" }
+      }
+    },
+    "updateAnnouncement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "release_sequence",
+        "version",
+        "manifest_sha256",
+        "artifact_sha256",
+        "release_key_id",
+        "signature_b64"
+      ],
+      "properties": {
+        "protocol_version": { "const": 1 },
+        "release_sequence": { "type": "integer", "minimum": 1 },
+        "version": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9.+-]+$"
+        },
+        "manifest_sha256": { "$ref": "#/$defs/hex32" },
+        "artifact_sha256": { "$ref": "#/$defs/hex32" },
+        "release_key_id": { "$ref": "#/$defs/hex32" },
+        "signature_b64": { "$ref": "#/$defs/base64url" }
+      }
+    }
+  }
+}
