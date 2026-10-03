@@ -13,6 +13,7 @@ parse_deps = false
 prefix_with_name = true
 
 [export]
+exclude = ["HHM_DESKTOP_P2P_PROTOCOL_VERSION"]
 include = [
   "HhmDesktopHandle",
   "HhmDesktopStatus",
