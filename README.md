@@ -19,14 +19,16 @@ shell can reuse the same bounded state contract.
 | Shared Auth | Fail-closed public configuration boundary; official typed client artifact is a release gate |
 | Supabase | Documented credential-authority boundary; platform sign-in adapter is future work |
 | Visitor sign-in/sign-out QR | Backend-issued 1–60 second lease metadata contract; QR rendering/network adapter is future work |
-| Bluetooth proximity | Opt-in display/request hint; native BLE adapter is future work |
-| Portable P2P | Consent/session/replay/rate/update-metadata policy, schema, and adversarial tests; crypto/transport adapters are release gates |
+| Managed doorway | Canonical signed-challenge + separately keyed corroboration gate, exact nonce/decision binding, no FFI exposure; native verifier/signer/API adapters are release gates |
+| Portable P2P | Canonical `hhm-interfaces` contract plus stricter consent/session/replay/rate/update and closed-JSON policy; crypto/transport adapters are release gates |
 | Observability | Bounded Ores/OpenTelemetry structured transitions, pinned to an immutable Git revision |
 | Configuration | SOPS+age ciphertext under `env/enc`, audited through Just and available in a locked Nix shell |
 
 This repository does not yet package installers, scan BLE beacons, draw an
-opaque QR payload, or call HHM's presence API. Those are explicit follow-on
-adapters, not simulated behavior.
+opaque QR payload, or call HHM's presence API. It does validate canonical
+managed-doorway and P2P JSON contracts without expanding the stable C ABI.
+Hardware, cryptographic, network, and durable backend behavior remain explicit
+follow-on adapters, not simulated behavior.
 
 Authentication is also intentionally unavailable in this public build: the
 current upstream Shared Auth source cannot be fetched by unauthenticated public
@@ -111,10 +113,11 @@ and Ores logging are declared as Zed dependencies installed under
 `.vendor/.zed`. A `.zpkg.lock` is committed only after a real successful Zed
 resolver run; it is never fabricated from Git metadata.
 
-The Cargo Git dependency for Ores is pinned to a reviewed immutable commit, so
-a branch movement cannot silently change a build. Shared Auth remains an
-official-client Zed dependency and release gate rather than a private Cargo Git
-dependency that would require leaking repository credentials into public CI.
+The Cargo Git dependencies for Ores and the public `hhm-interfaces` contract
+are pinned to reviewed immutable commits, so branch movement cannot silently
+change a build. Shared Auth remains an official-client Zed dependency and
+release gate rather than a private Cargo Git dependency that would require
+leaking repository credentials into public CI.
 
 ## Encrypted configuration
 

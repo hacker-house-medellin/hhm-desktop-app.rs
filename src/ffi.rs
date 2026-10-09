@@ -15,7 +15,6 @@ use crate::{
     HHM_DESKTOP_ABI_VERSION,
     domain::{AppSnapshot, AuthDisplayState, DoorProximity, ProductAccess, QrLease, QrPurpose},
     observability::Observability,
-    p2p::HHM_DESKTOP_P2P_PROTOCOL_VERSION,
 };
 
 #[repr(i32)]
@@ -48,10 +47,12 @@ pub extern "C" fn hhm_desktop_abi_version() -> u32 {
     HHM_DESKTOP_ABI_VERSION
 }
 
-/// Returns the portable P2P wire-policy version shared with Flutter.
+/// Returns the static NUL-terminated canonical P2P protocol identifier.
+///
+/// The pointer remains valid for the life of the process and must not be freed.
 #[unsafe(no_mangle)]
-pub extern "C" fn hhm_desktop_p2p_protocol_version() -> u32 {
-    HHM_DESKTOP_P2P_PROTOCOL_VERSION
+pub extern "C" fn hhm_desktop_p2p_protocol_version() -> *const c_char {
+    c"hhm.p2p.v1".as_ptr()
 }
 
 #[unsafe(no_mangle)]
