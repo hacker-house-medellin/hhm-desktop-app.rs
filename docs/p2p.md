@@ -1,63 +1,105 @@
-# Portable peer-to-peer protocol v1
+# Authenticated P2P over nearby transports
 
-The Rust desktop and Flutter apps share
-[`contracts/p2p-v1.schema.json`](../contracts/p2p-v1.schema.json) and its
-synthetic fixtures. BLE is one possible discovery/transport layer; it is not a
-trust source, authentication factor, authorization grant, or reliable proof of
-distance or doorway crossing.
+`hhm-interfaces` is the sole wire-contract authority. This repository consumes
+the public Rust crate at exact commit
+`ffc1df71d1d89202b431f4830cc2a43e4a451da3` and vendors byte-for-byte copies
+for non-Rust clients:
 
-## Session gate
+- `contracts/p2p-v1.schema.json` is upstream
+  `schemas/peer-session.json` (Git blob
+  `94e72f5fbf65815f28ba718cabceb93ebf9b744c`);
+- `contracts/fixtures/peer-session.json` is upstream
+  `fixtures/peer-session.json` (Git blob
+  `75df4f5435b67d278f8ea19286b192e8eca0cf10`);
+- `contracts/fixtures/p2p-json-records.json` and
+  `contracts/fixtures/doorway-observation.json` are byte-identical upstream v1
+  fixtures with SHA-256 digests
+  `d49aa5ee80e33603f82700b98488bf67af20885fe87c2ab8698647662aab9ba0`
+  and `b4f70e954accecfec58fcbe9e8504f1bf7be104cfacdd209cd1c80c06773fb63`.
 
-1. The user opts in and explicitly selects one displayed peer.
-2. Consent is local, peer-specific, revocable, and expires within five minutes.
-3. A session offer binds protocol version, both device public-key fingerprints,
-   a 128-bit session ID, a 256-bit challenge nonce, issue/expiry times, and a
-   device-bound signature.
-4. The reviewed crypto adapter validates the device binding and Shared Auth
-   session policy. `invalid` and `unavailable` both fail closed; the domain
-   preserves the distinction for diagnostics.
-5. A session lasts at most 15 minutes and must be re-established after expiry.
+The compatibility test deserializes every canonical fixture object through the
+pinned `hhm-interfaces` types and runs their shape validation. The protocol
+identifier is the string `hhm.p2p.v1`, not a local numeric version.
 
-There is no production crypto adapter in this scaffold. The contract does not
-parse Shared Auth tokens, mint a verified outcome, or simulate success.
+## Trust and consent boundary
 
-## Envelopes
+Bluetooth Low Energy is only a possible discovery and frame transport. RSSI,
+proximity, pairing, device names, and a successful connection are not identity,
+authentication, authorization, assurance, resident status, or proof of a door
+transition. Discovery and sharing require a foreground opt-in and explicit peer
+and capability selection. Consent expires within five minutes.
 
-Every envelope binds the selected peer, session, strictly increasing sequence,
-short expiry, 192-bit AEAD nonce, allowlisted kind, ciphertext, and device
-signature. The crypto adapter must authenticate both the signature and the
-end-to-end encrypted payload before the guard commits replay/rate state.
+Automatic resident arrival/departure is a separate corroborated presence
+workflow. The P2P allowlist contains no presence payload.
 
-Bounds:
+The canonical handshake binds fresh offers, challenges, ephemeral public keys,
+device key identifiers, a short expiry, and the requested/selected capability
+set. `PeerCryptoVerifier` is a typed boundary for the reviewed device-bound
+Shared Auth adapter. The domain has no production verifier, JWT parser,
+introspection client, or success stub. Both `invalid` and `unavailable` fail
+closed. An accepted handshake must select at least one requested capability.
 
-- ciphertext: 1–32 KiB;
-- expiry: no more than 60 seconds and never beyond session expiry;
-- rate: 30 messages and 256 KiB per rolling minute;
-- remembered nonce replay set: 128 entries, in addition to monotonic sequence;
-- payload kinds: presence request *hint*, house notice, resident message.
+## Encrypted envelopes
 
-Presence hints still require a fresh authoritative HHM backend request. The
-protocol has no payload kinds for access/refresh tokens, cookies, private keys,
-passwords, OTPs, camera/video, conversations/audio, precise location, biometric
-material, visitor QR bearer values, or arbitrary executable data. Applications
-must not tunnel those values inside an allowlisted ciphertext kind.
+Only the canonical payload types are accepted:
 
-## Peer update discovery
+- `hhm.resident-message.v1`;
+- `hhm.contact-card.v1`;
+- `hhm.file-manifest.v1`;
+- `hhm.update-manifest.v1`;
+- `hhm.receipt.v1`.
 
-A peer may advertise signed metadata only: monotonically increasing release
-sequence, display version, manifest SHA-256, artifact SHA-256, project release
-key identifier, and signature. The policy requires the pinned project release
-key and rejects equal/older sequences.
+The selected handshake capabilities gate those types. Each envelope carries a
+session ID, message ID, monotonic sequence, authenticated timestamps, sender
+key ID, nonce, and end-to-end ciphertext. The desktop policy is intentionally
+stricter than the shared ceiling:
 
-Acceptance returns metadata, never a URL, artifact bytes, script, dynamic
-library, or install instruction. An official updater must independently fetch
-the manifest/artifact from its configured trusted origin, verify both digests
-and the pinned release signature, enforce platform/channel policy, and use the
-normal reviewed installer. Peer-supplied code is never loaded or executed.
+- at most 32 KiB of decoded ciphertext;
+- at most 60 seconds from creation to expiry;
+- at most 15 minutes per local session;
+- at most 30 envelopes and 256 KiB per minute;
+- replay rejection by message ID, nonce, and sequence, retaining 128 IDs and
+  128 nonces in addition to the monotonic sequence.
 
-## FFI
+Failed cryptographic verification does not consume a nonce or advance the
+sequence, avoiding an unauthenticated denial-of-service primitive. Decrypted
+contact cards, plain-text resident messages, and receipts must additionally
+pass `validate_peer_json_record` before the envelope is committed: local
+sharing consent defaults off, envelope type must equal the inner schema, and
+the canonical validator rejects unknown fields, non-HTTPS website values,
+control characters, expiry, and lifetimes over ten minutes. Arbitrary JSON,
+HTML execution, and implicit file transfer are not extensions.
 
-The stable C ABI exposes only `hhm_desktop_p2p_protocol_version()`. Session,
-crypto, and envelope mutation are not exposed until the official device-bound
-crypto adapter exists, preventing foreign callers from manufacturing a
-`verified` state. This additive function advances the ABI from 1.0 to 1.1.
+Passwords, access or refresh tokens, cookies, service credentials, private
+keys, OTP/TOTP values or seeds, biometrics, door challenges, visitor QR bearer
+values, payment material, camera/video, conversations/audio, and precise
+location must never be sent or tunneled inside an allowlisted payload.
+
+## Peer-assisted update discovery
+
+A peer may carry only a canonical `SignedUpdateManifest`; the peer remains an
+untrusted discovery/cache hint. The desktop policy additionally requires:
+
+1. application ID `hhm-desktop-app.rs` and the configured platform/channel;
+2. a project-pinned release signing key ID and official verifier result;
+3. a strictly increasing anti-rollback counter; and
+4. an allowlisted official HTTPS origin with no credentials, query, or
+   fragment.
+
+Acceptance yields metadata only. This module never fetches, installs, loads, or
+executes an artifact. A reviewed updater must independently retrieve the bytes
+from the official origin, verify the canonical manifest, digest, release
+signature, platform signature/notarization, and OS installation policy. Peer
+input never authorizes scripts, WASM, native libraries, UI blobs, or executable
+code.
+
+## FFI and release gate
+
+The C ABI exposes only the static canonical protocol identifier. It does not
+expose setters that can manufacture verified handshakes, sessions, envelopes,
+or updates.
+
+Production P2P remains disabled until the official Shared Auth client and
+device-bound verifier are publicly consumable, platform permission and privacy
+reviews are complete, and interoperable hostile tests/fuzzing have passed in
+`hhm-interfaces`, `hhm-flutter`, and this repository.
